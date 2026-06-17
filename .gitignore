@@ -1,0 +1,6 @@
+*.log
+*.exe
+*.test
+bin/
+coverage.out
+.tmp/
