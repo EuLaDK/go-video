@@ -43,6 +43,19 @@ func (service *fakeAccountService) Logout(ctx context.Context, userID string) (a
 	return service.profile, nil
 }
 
+// ActivateVIP 模拟 VIP 开通；ctx 为请求上下文，userID 为用户标识，input 为到期日。
+func (service *fakeAccountService) ActivateVIP(ctx context.Context, userID string, input account.VipInput) (account.UserProfile, error) {
+	service.userID = userID
+	service.profile = account.UserProfile{
+		ID:         userID,
+		IsLoggedIn: true,
+		IsVip:      true,
+		Nickname:   "VIP 用户",
+		VipUntil:   input.VipUntil,
+	}
+	return service.profile, nil
+}
+
 // Favorites 模拟收藏列表；ctx 为请求上下文，userID 为用户标识。
 func (service *fakeAccountService) Favorites(ctx context.Context, userID string) ([]account.FavoriteItem, error) {
 	service.userID = userID
@@ -143,6 +156,27 @@ func TestAccountRoutesLoginAndLogout(t *testing.T) {
 	rec = requestJSON(srv, http.MethodPost, "/me/logout", "", "custom-user")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("logout status = %d, want 200", rec.Code)
+	}
+}
+
+func TestAccountRoutesActivateVIP(t *testing.T) {
+	accountService := &fakeAccountService{}
+	srv := httpapi.NewServer(&fakeVideoService{}, accountService)
+
+	rec := requestJSON(srv, http.MethodPost, "/me/vip", `{"vipUntil":"2027-06-25"}`, "vip-user")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("activate vip status = %d, want 200", rec.Code)
+	}
+
+	var profile account.UserProfile
+	if err := json.Unmarshal(rec.Body.Bytes(), &profile); err != nil {
+		t.Fatal(err)
+	}
+	if accountService.userID != "vip-user" {
+		t.Fatalf("userID = %q, want vip-user", accountService.userID)
+	}
+	if !profile.IsLoggedIn || !profile.IsVip || profile.VipUntil != "2027-06-25" {
+		t.Fatalf("profile = %#v", profile)
 	}
 }
 

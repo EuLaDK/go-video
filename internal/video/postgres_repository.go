@@ -82,6 +82,40 @@ func (repository *PostgresRepository) ListVideos(ctx context.Context) ([]Video, 
 	return videos, nil
 }
 
+// ListPlaybackSources 从 PostgreSQL 读取单个视频的播放源；ctx 为请求上下文，videoID 为视频 id。
+func (repository *PostgresRepository) ListPlaybackSources(ctx context.Context, videoID string) ([]PlaybackSource, error) {
+	rows, err := repository.pool.Query(ctx, `
+		SELECT quality, label, source_url, mime_type
+		FROM video_playback_sources
+		WHERE video_id = $1
+		ORDER BY display_order ASC, quality ASC
+	`, videoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	sources := []PlaybackSource{}
+	for rows.Next() {
+		var source PlaybackSource
+		if err := rows.Scan(
+			&source.Quality,
+			&source.Label,
+			&source.SourceURL,
+			&source.MimeType,
+		); err != nil {
+			return nil, err
+		}
+		sources = append(sources, source)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return sources, nil
+}
+
 // listVideoRows 读取视频主体字段；ctx 为请求上下文。
 func (repository *PostgresRepository) listVideoRows(ctx context.Context) ([]Video, error) {
 	rows, err := repository.pool.Query(ctx, `

@@ -2,6 +2,7 @@ package video_test
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -9,8 +10,9 @@ import (
 )
 
 type fakeRepository struct {
-	channels []video.Channel
-	videos   []video.Video
+	channels        []video.Channel
+	playbackSources map[string][]video.PlaybackSource
+	videos          []video.Video
 }
 
 // ListChannels 返回测试用频道列表；ctx 为调用上下文。
@@ -21,6 +23,11 @@ func (repo fakeRepository) ListChannels(ctx context.Context) ([]video.Channel, e
 // ListVideos 返回测试用视频列表；ctx 为调用上下文。
 func (repo fakeRepository) ListVideos(ctx context.Context) ([]video.Video, error) {
 	return repo.videos, nil
+}
+
+// ListPlaybackSources 返回测试用播放源列表；ctx 为调用上下文，videoID 为当前视频 id。
+func (repo fakeRepository) ListPlaybackSources(ctx context.Context, videoID string) ([]video.PlaybackSource, error) {
+	return repo.playbackSources[videoID], nil
 }
 
 func TestServiceHomePageUsesDefaultSlices(t *testing.T) {
@@ -124,6 +131,155 @@ func TestServiceWatchPageAndVideoIDs(t *testing.T) {
 
 	if !reflect.DeepEqual(ids, []string{"xinghe", "movie-a", "drama-a", "vip-a", "doc-a"}) {
 		t.Fatalf("ids = %#v", ids)
+	}
+}
+
+func TestServiceWatchPageReturnsPlaybackConfig(t *testing.T) {
+	svc := video.NewService(sampleRepository())
+
+	page, err := svc.WatchPage(context.Background(), "vip-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var payload struct {
+		Playback struct {
+			Sources []struct {
+				Quality   string `json:"quality"`
+				Label     string `json:"label"`
+				SourceURL string `json:"sourceUrl"`
+				MimeType  string `json:"mimeType"`
+			} `json:"sources"`
+			DefaultQuality string `json:"defaultQuality"`
+			RequiresVIP    bool   `json:"requiresVip"`
+			CanPlay        bool   `json:"canPlay"`
+			TrialSeconds   int    `json:"trialSeconds"`
+			Message        string `json:"message"`
+		} `json:"playback"`
+	}
+	body, err := json.Marshal(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(payload.Playback.Sources) != 1 {
+		t.Fatalf("len(playback.sources) = %d, want 1", len(payload.Playback.Sources))
+	}
+	source := payload.Playback.Sources[0]
+	if source.SourceURL != "/assets/video/staticTest.mp4" {
+		t.Fatalf("sourceUrl = %q, want /assets/video/staticTest.mp4", source.SourceURL)
+	}
+	if source.Quality != "4K" || source.Label != "4K" {
+		t.Fatalf("source quality/label = %q/%q, want 4K/4K", source.Quality, source.Label)
+	}
+	if source.MimeType != "video/mp4" {
+		t.Fatalf("mimeType = %q, want video/mp4", source.MimeType)
+	}
+	if payload.Playback.DefaultQuality != "4K" {
+		t.Fatalf("defaultQuality = %q, want 4K", payload.Playback.DefaultQuality)
+	}
+	if !payload.Playback.RequiresVIP {
+		t.Fatalf("requiresVip = false, want true")
+	}
+	if payload.Playback.CanPlay {
+		t.Fatalf("canPlay = true, want false for non-VIP viewer")
+	}
+	if payload.Playback.TrialSeconds != 360 {
+		t.Fatalf("trialSeconds = %d, want 360", payload.Playback.TrialSeconds)
+	}
+	if payload.Playback.Message == "" {
+		t.Fatalf("message is empty, want VIP playback prompt")
+	}
+}
+
+func TestServiceWatchPageAllowsVipViewerToPlayVipContent(t *testing.T) {
+	svc := video.NewService(sampleRepository())
+	ctx := video.ContextWithPlaybackViewer(context.Background(), video.PlaybackViewer{
+		IsVIP: true,
+	})
+
+	page, err := svc.WatchPage(ctx, "vip-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !page.Playback.RequiresVIP {
+		t.Fatalf("requiresVip = false, want true")
+	}
+	if !page.Playback.CanPlay {
+		t.Fatalf("canPlay = false, want true for VIP viewer")
+	}
+	if page.Playback.TrialSeconds != 0 {
+		t.Fatalf("trialSeconds = %d, want 0 for VIP viewer", page.Playback.TrialSeconds)
+	}
+	if page.Playback.Message == "" {
+		t.Fatalf("message is empty, want VIP playback message")
+	}
+}
+
+func TestServiceWatchPageReturnsResumePointFromContext(t *testing.T) {
+	svc := video.NewService(sampleRepository())
+	ctx := video.ContextWithPlaybackViewer(context.Background(), video.PlaybackViewer{
+		Resume: video.PlaybackResume{
+			CanResume:       true,
+			Episode:         2,
+			WatchSeconds:    90,
+			DurationSeconds: 2700,
+		},
+	})
+
+	page, err := svc.WatchPage(ctx, "xinghe")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !page.Playback.Resume.CanResume {
+		t.Fatalf("resume canResume = false, want true")
+	}
+	if page.Playback.Resume.Episode != 2 || page.Playback.Resume.WatchSeconds != 90 || page.Playback.Resume.DurationSeconds != 2700 {
+		t.Fatalf("resume = %#v", page.Playback.Resume)
+	}
+}
+
+func TestServiceWatchPageUsesRepositoryPlaybackSources(t *testing.T) {
+	repository := sampleRepository()
+	repository.playbackSources = map[string][]video.PlaybackSource{
+		"vip-a": {
+			{
+				Quality:   "4K",
+				Label:     "4K 超清",
+				SourceURL: "/media/vip-a-4k.mp4",
+				MimeType:  "video/mp4",
+			},
+			{
+				Quality:   "1080P",
+				Label:     "1080P 高清",
+				SourceURL: "/media/vip-a-1080p.mp4",
+				MimeType:  "video/mp4",
+			},
+		},
+	}
+	svc := video.NewService(repository)
+
+	page, err := svc.WatchPage(context.Background(), "vip-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(page.Playback.Sources) != 2 {
+		t.Fatalf("len(playback.sources) = %d, want 2", len(page.Playback.Sources))
+	}
+	if page.Playback.Sources[0].SourceURL != "/media/vip-a-4k.mp4" {
+		t.Fatalf("first sourceUrl = %q, want repository source", page.Playback.Sources[0].SourceURL)
+	}
+	if page.Playback.Sources[1].Quality != "1080P" {
+		t.Fatalf("second quality = %q, want 1080P", page.Playback.Sources[1].Quality)
+	}
+	if page.Playback.DefaultQuality != "4K" {
+		t.Fatalf("defaultQuality = %q, want 4K", page.Playback.DefaultQuality)
 	}
 }
 

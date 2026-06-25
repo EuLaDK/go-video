@@ -13,6 +13,7 @@ import (
 type AccountService interface {
 	Profile(ctx context.Context, userID string) (account.UserProfile, error)
 	Login(ctx context.Context, userID string, input account.LoginInput) (account.UserProfile, error)
+	ActivateVIP(ctx context.Context, userID string, input account.VipInput) (account.UserProfile, error)
 	Logout(ctx context.Context, userID string) (account.UserProfile, error)
 	Favorites(ctx context.Context, userID string) ([]account.FavoriteItem, error)
 	AddFavorite(ctx context.Context, userID string, input account.FavoriteInput) (account.FavoriteItem, error)
@@ -40,6 +41,8 @@ func (server *Server) handleAccount(response http.ResponseWriter, request *http.
 		server.handleProfile(response, request)
 	case request.URL.Path == "/me/login":
 		server.handleLogin(response, request)
+	case request.URL.Path == "/me/vip":
+		server.handleActivateVIP(response, request)
 	case request.URL.Path == "/me/logout":
 		server.handleLogout(response, request)
 	case request.URL.Path == "/me/favorites":
@@ -85,6 +88,28 @@ func (server *Server) handleLogin(response http.ResponseWriter, request *http.Re
 	}
 
 	profile, err := server.accountService.Login(request.Context(), userIDFromRequest(request), input)
+	if err != nil {
+		writeError(response, http.StatusInternalServerError, "internal server error")
+		return
+	}
+
+	writeJSON(response, http.StatusOK, profile)
+}
+
+// handleActivateVIP 写入当前用户 VIP 状态；response 为响应写入器，request 为当前请求。
+func (server *Server) handleActivateVIP(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writeError(response, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var input account.VipInput
+	if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+		writeError(response, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	profile, err := server.accountService.ActivateVIP(request.Context(), userIDFromRequest(request), input)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, "internal server error")
 		return

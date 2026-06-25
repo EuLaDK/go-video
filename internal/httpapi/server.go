@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"next-video-golang/internal/account"
 	"next-video-golang/internal/interaction"
@@ -173,13 +174,64 @@ func (server *Server) handleSearch(response http.ResponseWriter, request *http.R
 func (server *Server) handleWatch(response http.ResponseWriter, request *http.Request) {
 	videoID := strings.TrimPrefix(request.URL.Path, "/videos/")
 	videoID = pathValue(videoID)
-	data, err := server.videoService.WatchPage(request.Context(), videoID)
+	ctx := request.Context()
+	if server.accountService != nil {
+		userID := userIDFromRequest(request)
+		profile, err := server.accountService.Profile(ctx, userID)
+		if err != nil {
+			writeError(response, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		watchHistory, err := server.accountService.WatchHistory(ctx, userID)
+		if err != nil {
+			writeError(response, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		ctx = video.ContextWithPlaybackViewer(ctx, video.PlaybackViewer{
+			IsVIP:  isActiveVIPProfile(profile, time.Now()),
+			Resume: playbackResumeFromHistory(videoID, watchHistory),
+		})
+	}
+
+	data, err := server.videoService.WatchPage(ctx, videoID)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, "internal server error")
 		return
 	}
 
 	writeJSON(response, http.StatusOK, data)
+}
+
+// playbackResumeFromHistory 从观看历史提取当前视频恢复点；videoID 为播放页视频，items 为用户历史列表。
+func playbackResumeFromHistory(videoID string, items []account.WatchHistoryItem) video.PlaybackResume {
+	for _, item := range items {
+		if item.ID != videoID {
+			continue
+		}
+
+		watchSeconds := intValue(item.WatchSeconds)
+		durationSeconds := intValue(item.DurationSeconds)
+		if watchSeconds <= 0 {
+			continue
+		}
+		if durationSeconds > 0 && watchSeconds >= durationSeconds-5 {
+			continue
+		}
+
+		episode := intValue(item.Episode)
+		if episode <= 0 {
+			episode = 1
+		}
+
+		return video.PlaybackResume{
+			CanResume:       true,
+			Episode:         episode,
+			WatchSeconds:    watchSeconds,
+			DurationSeconds: durationSeconds,
+		}
+	}
+
+	return video.PlaybackResume{}
 }
 
 // handleVideoIDs 返回视频 id 列表；response 为响应写入器，request 为当前请求。
@@ -197,7 +249,7 @@ func (server *Server) handleVideoIDs(response http.ResponseWriter, request *http
 func addCORSHeaders(response http.ResponseWriter) {
 	response.Header().Set("Access-Control-Allow-Origin", "*")
 	response.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
-	response.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	response.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-ID")
 }
 
 // writeJSON 写入 JSON 响应；response 为响应写入器，status 为状态码，data 为响应体。
@@ -234,6 +286,33 @@ func userIDFromRequest(request *http.Request) string {
 	}
 
 	return userID
+}
+
+// isActiveVIPProfile 判断用户会员是否有效；profile 为账号资料，now 为当前时间。
+func isActiveVIPProfile(profile account.UserProfile, now time.Time) bool {
+	if !profile.IsVip {
+		return false
+	}
+	if strings.TrimSpace(profile.VipUntil) == "" {
+		return true
+	}
+
+	vipUntil, err := time.Parse("2006-01-02", profile.VipUntil)
+	if err != nil {
+		return true
+	}
+
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	return !vipUntil.Before(today)
+}
+
+// intValue 读取可选整数指针；value 为空时返回 0。
+func intValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+
+	return *value
 }
 
 // commentSortFromRequest 读取评论排序参数；request 为当前请求。

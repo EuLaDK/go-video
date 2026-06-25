@@ -1,6 +1,6 @@
 # Next Video Go 后端开发记录
 
-更新日期：2026-06-17
+更新日期：2026-06-25
 
 ## 当前完成
 
@@ -59,6 +59,31 @@
   - `video_comments`
   - `video_comment_likes`
   - `video_danmaku`
+- 已实现播放配置接口第一版：
+  - `GET /videos/{id}` 的响应新增 `playback` 字段。
+  - `playback.sources` 已支持从独立播放源表读取；没有配置时继续从现有 `source_url` 和 `quality` 派生。
+  - 已返回 `defaultQuality`、`requiresVip`、`canPlay`、`trialSeconds` 和 `message`，用于前端播放器控制播放源、清晰度和试看提示。
+  - `canPlay` 已根据当前用户 VIP 状态计算；非 VIP 会员内容保留 360 秒试看，VIP 用户完整放行。
+- 已新增多播放源持久化：
+  - 新增 `video_playback_sources` 表。
+  - 每条播放源保存 `quality`、`label`、`source_url`、`mime_type` 和 `display_order`。
+  - `GET /videos/{id}` 优先返回表内多源配置，表内无记录时回退到 `videos.source_url`。
+  - seed 已给 `xinghe` 配置 `4K HDR / 1080P / 720P` 三档示例播放源。
+- 已接入真实 VIP 鉴权第一版：
+  - 播放详情路由读取 `X-User-ID` 对应账号资料，按 `is_vip` 和 `vip_until` 生成播放鉴权状态。
+  - 默认 `demo-user` 为非 VIP；新增 `demo-vip` 开发态用户用于本地验证 VIP 放行。
+  - CORS 已允许 `X-User-ID` 请求头。
+- 已实现前端 VIP 状态同步到后端第一版：
+  - 新增 `POST /me/vip`，请求体为 `{"vipUntil":"YYYY-MM-DD"}`。
+  - 接口会把当前 `X-User-ID` 对应用户写为 `is_logged_in=true`、`is_vip=true`，并更新 `vip_until`。
+  - 前端 VIP 页面套餐购买已通过 `activateAccountVip` 写回后端，同时保留本地 fallback。
+- 已实现断点续播服务端策略第一版：
+  - `GET /videos/{id}` 的 `playback` 新增 `resume` 字段。
+  - 播放详情路由会读取当前 `X-User-ID` 用户的 `/me/watch-history`，为当前视频提取最近有效观看秒数。
+  - 前端播放页无 URL `episode/t` 参数时，优先使用后端 `playback.resume` 作为初始集数和播放秒数。
+- 前端 `next-video` 播放页已读取播放配置：
+  - `src/lib/video-api.ts` 的 mock fallback 返回同形 `playback` 配置。
+  - `PlayerShell` 使用 `playback.sources` 作为 `<video>` 播放源，并提供清晰度选择。
 
 ## 后续计划
 
@@ -74,11 +99,9 @@
 4. 增加互动数据服务端化：
    - 评论。
    - 弹幕。
-5. 增加真实播放器能力：
-   - HLS/DASH 播放源。
-   - 清晰度切换。
-   - 试看和会员鉴权。
-   - 断点续播同步。
+5. 继续增强真实播放器能力：
+   - 增加前端 HLS/DASH 播放引擎适配。
+   - 继续完善断点续播展示和播放页冒烟测试。
 6. 增加后台内容管理：
    - 视频新增和编辑。
    - 上下架。
@@ -89,21 +112,34 @@
 
 ### 下次继续开发入口
 
-今天先暂停在这里。下次建议从 **前端联调已完成的 Go API** 开始，不急着继续扩后端新能力。
+本次已完成 **真实 VIP 鉴权 v1**、**前端 VIP 状态同步 v1** 和 **断点续播服务端策略 v1**。下次建议从 HLS/DASH 播放适配和播放页冒烟测试继续，不急着做后台内容管理。
 
 优先顺序：
 
-1. 在 `next-video` 前端配置：
+1. 前端 HLS/DASH 播放适配：
+   - 后端播放源表已支持 `mime_type`，但浏览器端还需要按类型接入 HLS/DASH 播放库。
+   - 先保留 MP4 seed，避免本地演示选择到不存在的流媒体资源。
+
+2. 播放页冒烟和组件测试：
+   - 覆盖播放详情读取 `playback.sources`、`playback.resume`、清晰度切换和初始恢复秒数。
+
+3. 本地联调时，在 `next-video` 前端配置：
 
 ```text
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
 ```
 
-2. 前端 localStorage 状态替换已完成第一轮联调：
+4. 前端 localStorage 状态替换已完成第一轮联调：
    - 用户资料、追剧收藏、观看历史已接入 API facade。
    - 首页、播放页、收藏页、历史页已通过本地 Next dev server 请求验证。
 
-3. 评论和弹幕服务端化第一版已完成，前端 `use-watch-interaction-store` 已接入 API facade。下一步建议做真实播放器接口能力。
+5. 评论和弹幕服务端化第一版已完成，前端 `use-watch-interaction-store` 已接入 API facade。
+6. VIP 套餐购买状态同步已完成第一版：
+   - 后端新增 `POST /me/vip`。
+   - 前端 `use-user-store.activateVip` 已优先写本地状态，再同步 Go API。
+7. 断点续播服务端策略已完成第一版：
+   - 后端 `GET /videos/{id}` 已返回 `playback.resume`。
+   - 前端播放页已在无 URL 秒数时使用后端恢复点。
 
 当前后端服务上次验证已启动在：
 
@@ -171,3 +207,49 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
 - `go run ./cmd/migrate`：通过，已执行 `003_create_watch_interaction_tables.sql` 和 `003_seed_watch_interactions.sql`。
 - 使用 8083 临时服务验证视频互动接口：`/health`、评论新增、评论点赞、评论列表、删除自己的评论、弹幕新增、弹幕列表均通过。
 - `node --test src\lib\interaction-api.test.mjs src\stores\watch-interaction-sync-store.test.mjs`：通过，6 个评论/弹幕前端同步测试全部通过。
+
+### 2026-06-25 播放配置 v1
+
+- `go test ./internal/video`：通过，已覆盖 `WatchPage` 返回 `playback.sources`、默认清晰度、会员试看和可播放状态。
+- `go test ./internal/httpapi`：通过，播放详情响应新增字段未破坏现有 HTTP 路由。
+- `go test ./...`：通过。
+- `node --test src\lib\video-api.test.mjs`：通过，播放页 mock fallback 已返回同形 `playback` 配置。
+- `node --test src\lib\*.test.mjs`：通过，89 个前端 lib 测试全部通过。
+- `npm.cmd run lint`：通过。
+
+### 2026-06-25 多播放源持久化 v1
+
+- `go test ./internal/video`：通过，已覆盖 repository 多播放源优先于旧 `source_url` 兜底。
+- `go test ./cmd/api`：通过，`PostgresRepository` 已满足视频服务接口。
+- `go test ./...`：通过。
+- `go run ./cmd/migrate`：通过，已执行 `004_create_video_playback_sources.sql` 和 `004_seed_video_playback_sources.sql`。
+- 使用 8091 临时服务验证 `GET /videos/xinghe`：返回 `4K HDR`、`1080P`、`720P` 三个 `playback.sources`，`defaultQuality` 为 `4K HDR`，`trialSeconds` 为 `360`。
+
+### 2026-06-25 真实 VIP 鉴权 v1
+
+- `go test ./internal/video`：通过，已覆盖非 VIP 用户观看会员内容时 `canPlay=false`，VIP 用户 `canPlay=true` 且 `trialSeconds=0`。
+- `go test ./internal/httpapi`：通过，已覆盖播放详情路由读取 `X-User-ID` 对应账号资料并注入播放鉴权状态。
+- `go test ./...`：通过。
+- `go run ./cmd/migrate`：通过，已写入 `demo-vip` 开发态用户。
+- 使用 8091 临时服务验证默认 `demo-user` 请求 `GET /videos/xinghe`：返回 `requiresVip=true`、`canPlay=false`、`trialSeconds=360`。
+- 使用 8091 临时服务验证 `X-User-ID: demo-vip` 请求 `GET /videos/xinghe`：返回 `requiresVip=true`、`canPlay=true`、`trialSeconds=0`。
+
+### 2026-06-25 前端 VIP 状态同步 v1
+
+- `go test ./internal/account`：通过，已覆盖 VIP 开通保留现有用户资料、缺失用户创建默认资料。
+- `go test ./internal/httpapi`：通过，已覆盖 `POST /me/vip` 读取 `X-User-ID` 并返回更新后的用户资料。
+- `go test -count=1 ./...`：通过，VIP 状态写入未破坏现有视频、账号、互动接口测试。
+- `node --test src\lib\account-api.test.mjs`：通过，已覆盖 `activateAccountVip` 向 `/me/vip` 发送 `vipUntil`。
+- `node --test src\stores\account-sync-stores.test.mjs`：通过，已覆盖 `activateVip` 乐观更新并同步后端响应。
+- `node --test src\lib\account-api.test.mjs src\stores\account-sync-stores.test.mjs`：通过，8 个账号同步相关用例全部通过。
+- `npm.cmd run lint`：通过。
+
+### 2026-06-25 断点续播服务端策略 v1
+
+- `go test ./internal/video`：通过，已覆盖 `playback.resume` 从播放上下文进入播放详情响应。
+- `go test ./internal/httpapi`：通过，已覆盖播放详情路由读取用户观看历史并注入当前视频恢复点。
+- `go test -count=1 ./...`：通过，断点续播恢复点未破坏现有后端接口测试。
+- `node --test src\lib\video-api.test.mjs`：通过，已覆盖 mock fallback 返回同形 `playback.resume`。
+- `node --test src\lib\playback-resume.test.mjs`：通过，已覆盖 URL 参数优先、无参数时使用后端恢复点。
+- `node --test src\lib\*.test.mjs`：通过，92 个前端 lib 用例全部通过。
+- `npm.cmd run lint`：通过。

@@ -65,9 +65,39 @@ type SearchPageData struct {
 	Videos               []Video  `json:"videos"`
 }
 
+type PlaybackSource struct {
+	Quality   string `json:"quality"`
+	Label     string `json:"label"`
+	SourceURL string `json:"sourceUrl"`
+	MimeType  string `json:"mimeType"`
+}
+
+type PlaybackConfig struct {
+	Sources        []PlaybackSource `json:"sources"`
+	DefaultQuality string           `json:"defaultQuality"`
+	RequiresVIP    bool             `json:"requiresVip"`
+	CanPlay        bool             `json:"canPlay"`
+	TrialSeconds   int              `json:"trialSeconds"`
+	Message        string           `json:"message"`
+	Resume         PlaybackResume   `json:"resume"`
+}
+
+type PlaybackResume struct {
+	CanResume       bool `json:"canResume"`
+	Episode         int  `json:"episode,omitempty"`
+	WatchSeconds    int  `json:"watchSeconds,omitempty"`
+	DurationSeconds int  `json:"durationSeconds,omitempty"`
+}
+
+type PlaybackViewer struct {
+	IsVIP  bool
+	Resume PlaybackResume
+}
+
 type WatchPageData struct {
-	RelatedVideos []Video `json:"relatedVideos"`
-	Video         Video   `json:"video"`
+	RelatedVideos []Video        `json:"relatedVideos"`
+	Playback      PlaybackConfig `json:"playback"`
+	Video         Video          `json:"video"`
 }
 
 type RankQuery struct {

@@ -17,6 +17,10 @@ type LoginInput struct {
 	Nickname  string `json:"nickname"`
 }
 
+type VipInput struct {
+	VipUntil string `json:"vipUntil"`
+}
+
 type FavoriteInput struct {
 	ID            string `json:"id"`
 	Title         string `json:"title"`

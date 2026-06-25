@@ -18,5 +18,16 @@ INSERT INTO users (
   '',
   '',
   NOW()
+),
+(
+  'demo-vip',
+  '',
+  '',
+  TRUE,
+  TRUE,
+  'Next Video VIP 用户',
+  '',
+  '2099-12-31',
+  NOW()
 )
 ON CONFLICT (id) DO NOTHING;

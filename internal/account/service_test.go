@@ -149,6 +149,54 @@ func TestServiceLoginAndLogout(t *testing.T) {
 	}
 }
 
+func TestServiceActivateVIPPreservesExistingProfile(t *testing.T) {
+	repo := newFakeRepository()
+	repo.users["vip-user"] = account.UserProfile{
+		ID:         "vip-user",
+		AvatarURL:  "/avatar.png",
+		Email:      "vip@example.com",
+		IsLoggedIn: false,
+		IsVip:      false,
+		Nickname:   "晴空",
+		Phone:      "13800000000",
+		VipUntil:   "",
+	}
+	svc := account.NewService(repo, fixedClock())
+
+	profile, err := svc.ActivateVIP(context.Background(), "vip-user", account.VipInput{
+		VipUntil: " 2027-06-25 ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !profile.IsLoggedIn || !profile.IsVip || profile.VipUntil != "2027-06-25" {
+		t.Fatalf("profile vip state = %#v", profile)
+	}
+	if profile.Nickname != "晴空" || profile.Email != "vip@example.com" || profile.Phone != "13800000000" || profile.AvatarURL != "/avatar.png" {
+		t.Fatalf("profile identity fields changed: %#v", profile)
+	}
+}
+
+func TestServiceActivateVIPCreatesDefaultProfileWhenMissing(t *testing.T) {
+	repo := newFakeRepository()
+	svc := account.NewService(repo, fixedClock())
+
+	profile, err := svc.ActivateVIP(context.Background(), "new-user", account.VipInput{
+		VipUntil: "2027-06-25",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if profile.ID != "new-user" || profile.Nickname != "Next Video 用户" {
+		t.Fatalf("profile = %#v", profile)
+	}
+	if !profile.IsLoggedIn || !profile.IsVip || profile.VipUntil != "2027-06-25" {
+		t.Fatalf("profile vip state = %#v", profile)
+	}
+}
+
 func TestServiceFavorites(t *testing.T) {
 	svc := account.NewService(newFakeRepository(), fixedClock())
 

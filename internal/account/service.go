@@ -83,6 +83,27 @@ func (service *Service) Login(ctx context.Context, userID string, input LoginInp
 	return profile, nil
 }
 
+// ActivateVIP 开通当前用户 VIP；ctx 为请求上下文，userID 为用户标识，input 为 VIP 到期日。
+func (service *Service) ActivateVIP(ctx context.Context, userID string, input VipInput) (UserProfile, error) {
+	normalizedUserID := normalizeUserID(userID)
+	profile, err := service.repository.GetUser(ctx, normalizedUserID)
+	if errors.Is(err, ErrUserNotFound) {
+		profile = defaultProfile(normalizedUserID)
+	} else if err != nil {
+		return UserProfile{}, err
+	}
+
+	profile.IsLoggedIn = true
+	profile.IsVip = true
+	profile.VipUntil = strings.TrimSpace(input.VipUntil)
+
+	if err := service.repository.UpsertUser(ctx, profile); err != nil {
+		return UserProfile{}, err
+	}
+
+	return profile, nil
+}
+
 // Logout 清空开发态登录资料；ctx 为请求上下文，userID 为用户标识。
 func (service *Service) Logout(ctx context.Context, userID string) (UserProfile, error) {
 	profile := defaultProfile(normalizeUserID(userID))

@@ -12,6 +12,7 @@ var defaultHotSearchKeywords = []string{"星河回响", "电影", "悬疑", "纪
 
 type Repository interface {
 	ListChannels(ctx context.Context) ([]Channel, error)
+	ListPlaybackSources(ctx context.Context, videoID string) ([]PlaybackSource, error)
 	ListVideos(ctx context.Context) ([]Video, error)
 }
 
@@ -19,9 +20,26 @@ type Service struct {
 	repository Repository
 }
 
+type playbackViewerContextKey struct{}
+
 // NewService 创建视频服务；repository 提供频道和视频的持久化读取能力。
 func NewService(repository Repository) *Service {
 	return &Service{repository: repository}
+}
+
+// ContextWithPlaybackViewer 将播放鉴权用户写入上下文；ctx 为请求上下文，viewer 描述当前用户权益。
+func ContextWithPlaybackViewer(ctx context.Context, viewer PlaybackViewer) context.Context {
+	return context.WithValue(ctx, playbackViewerContextKey{}, viewer)
+}
+
+// PlaybackViewerFromContext 从上下文读取播放鉴权用户；ctx 为请求上下文，未设置时返回非会员用户。
+func PlaybackViewerFromContext(ctx context.Context) PlaybackViewer {
+	viewer, ok := ctx.Value(playbackViewerContextKey{}).(PlaybackViewer)
+	if !ok {
+		return PlaybackViewer{}
+	}
+
+	return viewer
 }
 
 // HomePage 获取首页聚合数据；ctx 为请求上下文。
@@ -119,10 +137,15 @@ func (service *Service) WatchPage(ctx context.Context, videoID string) (WatchPag
 	}
 
 	currentVideo := getVideoByID(videos, videoID)
+	playbackSources, err := service.repository.ListPlaybackSources(ctx, currentVideo.ID)
+	if err != nil {
+		return WatchPageData{}, err
+	}
 	relatedVideos := getRelatedVideos(videos, currentVideo, 4)
 
 	return WatchPageData{
 		RelatedVideos: relatedVideos,
+		Playback:      buildPlaybackConfig(currentVideo, playbackSources, PlaybackViewerFromContext(ctx)),
 		Video:         currentVideo,
 	}, nil
 }
@@ -322,6 +345,117 @@ func isVIPVideoContent(item Video) bool {
 		strings.Contains(searchableText, "独播") ||
 		strings.Contains(searchableText, "4K") ||
 		strings.Contains(strings.ToLower(searchableText), "vip")
+}
+
+// buildPlaybackConfig 生成播放页配置；item 为当前视频，playbackSources 为持久化播放源列表，viewer 描述当前用户权益。
+func buildPlaybackConfig(item Video, playbackSources []PlaybackSource, viewer PlaybackViewer) PlaybackConfig {
+	sources := normalizePlaybackSources(playbackSources)
+	if len(sources) == 0 {
+		sources = buildFallbackPlaybackSources(item)
+	}
+
+	requiresVIP := isVIPVideoContent(item)
+	config := PlaybackConfig{
+		Sources:        sources,
+		DefaultQuality: defaultPlaybackQuality(item, sources),
+		RequiresVIP:    requiresVIP,
+		CanPlay:        len(sources) > 0 && (!requiresVIP || viewer.IsVIP),
+		Resume:         normalizePlaybackResume(viewer.Resume),
+	}
+
+	if requiresVIP && !viewer.IsVIP {
+		config.TrialSeconds = 360
+		config.Message = "VIP content supports 6-minute trial playback."
+	}
+	if requiresVIP && viewer.IsVIP {
+		config.Message = "VIP content unlocked."
+	}
+
+	return config
+}
+
+// normalizePlaybackResume 清理续播恢复点；resume 为当前用户在该视频上的最近观看位置。
+func normalizePlaybackResume(resume PlaybackResume) PlaybackResume {
+	if !resume.CanResume || resume.WatchSeconds <= 0 {
+		return PlaybackResume{}
+	}
+	if resume.DurationSeconds > 0 && resume.WatchSeconds >= resume.DurationSeconds-5 {
+		return PlaybackResume{}
+	}
+	if resume.Episode <= 0 {
+		resume.Episode = 1
+	}
+
+	resume.CanResume = true
+	return resume
+}
+
+// normalizePlaybackSources 清理播放源字段；sources 为持久化播放源列表。
+func normalizePlaybackSources(sources []PlaybackSource) []PlaybackSource {
+	normalizedSources := make([]PlaybackSource, 0, len(sources))
+	for _, source := range sources {
+		if source.SourceURL == "" {
+			continue
+		}
+		if source.Quality == "" {
+			source.Quality = "auto"
+		}
+		if source.Label == "" {
+			source.Label = source.Quality
+		}
+		if source.MimeType == "" {
+			source.MimeType = playbackMimeType(source.SourceURL)
+		}
+		normalizedSources = append(normalizedSources, source)
+	}
+
+	return normalizedSources
+}
+
+// buildFallbackPlaybackSources 从视频基础字段生成兜底播放源；item 为当前视频。
+func buildFallbackPlaybackSources(item Video) []PlaybackSource {
+	if item.SourceURL == "" {
+		return []PlaybackSource{}
+	}
+
+	quality := item.Quality
+	if quality == "" {
+		quality = "auto"
+	}
+
+	return []PlaybackSource{
+		{
+			Quality:   quality,
+			Label:     quality,
+			SourceURL: item.SourceURL,
+			MimeType:  playbackMimeType(item.SourceURL),
+		},
+	}
+}
+
+// defaultPlaybackQuality 生成默认清晰度；item 为当前视频，sources 为可用播放源。
+func defaultPlaybackQuality(item Video, sources []PlaybackSource) string {
+	if item.Quality != "" {
+		return item.Quality
+	}
+	if len(sources) > 0 {
+		return sources[0].Quality
+	}
+
+	return ""
+}
+
+// playbackMimeType 根据播放地址推断媒体类型；sourceURL 为视频播放地址。
+func playbackMimeType(sourceURL string) string {
+	lowerSourceURL := strings.ToLower(sourceURL)
+	switch {
+	case strings.HasSuffix(lowerSourceURL, ".m3u8"):
+		return "application/vnd.apple.mpegurl"
+	case strings.HasSuffix(lowerSourceURL, ".mpd"):
+		return "application/dash+xml"
+	default:
+		return "video/mp4"
+	}
 }
 
 // getVideoByID 根据 id 获取视频；videos 为候选视频，未命中时返回第一个视频。

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"testing"
 
+	"next-video-golang/internal/account"
 	"next-video-golang/internal/httpapi"
 	"next-video-golang/internal/video"
 )
@@ -18,6 +19,7 @@ type fakeVideoService struct {
 	rankQuery    video.RankQuery
 	channelQuery video.ChannelQuery
 	searchQuery  video.SearchQuery
+	watchViewer  video.PlaybackViewer
 	watchID      string
 }
 
@@ -64,6 +66,7 @@ func (service *fakeVideoService) SearchPage(ctx context.Context, query video.Sea
 // WatchPage 模拟播放详情数据；ctx 为请求上下文，videoID 为视频 id。
 func (service *fakeVideoService) WatchPage(ctx context.Context, videoID string) (video.WatchPageData, error) {
 	service.watchID = videoID
+	service.watchViewer = video.PlaybackViewerFromContext(ctx)
 	return video.WatchPageData{
 		Video:         sampleVideo(videoID),
 		RelatedVideos: []video.Video{sampleVideo("related-a")},
@@ -116,6 +119,68 @@ func TestServerRoutesQueryParameters(t *testing.T) {
 	get(srv, "/videos/xinghe")
 	if service.watchID != "xinghe" {
 		t.Fatalf("watchID = %q, want xinghe", service.watchID)
+	}
+}
+
+func TestServerWatchRouteInjectsPlaybackViewer(t *testing.T) {
+	videoService := &fakeVideoService{}
+	accountService := &fakeAccountService{
+		profile: account.UserProfile{
+			ID:    "vip-user",
+			IsVip: true,
+		},
+	}
+	srv := httpapi.NewServer(videoService, accountService)
+	req := httptest.NewRequest(http.MethodGet, "/videos/xinghe", nil)
+	req.Header.Set("X-User-ID", "vip-user")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if accountService.userID != "vip-user" {
+		t.Fatalf("account userID = %q, want vip-user", accountService.userID)
+	}
+	if !videoService.watchViewer.IsVIP {
+		t.Fatalf("watch viewer IsVIP = false, want true")
+	}
+}
+
+func TestServerWatchRouteInjectsResumePoint(t *testing.T) {
+	episode := 2
+	watchSeconds := 90
+	durationSeconds := 2700
+	videoService := &fakeVideoService{}
+	accountService := &fakeAccountService{
+		watchHistory: []account.WatchHistoryItem{
+			{
+				ID:              "xinghe",
+				Episode:         &episode,
+				WatchSeconds:    &watchSeconds,
+				DurationSeconds: &durationSeconds,
+			},
+		},
+	}
+	srv := httpapi.NewServer(videoService, accountService)
+	req := httptest.NewRequest(http.MethodGet, "/videos/xinghe", nil)
+	req.Header.Set("X-User-ID", "resume-user")
+	rec := httptest.NewRecorder()
+
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if accountService.userID != "resume-user" {
+		t.Fatalf("account userID = %q, want resume-user", accountService.userID)
+	}
+	if !videoService.watchViewer.Resume.CanResume {
+		t.Fatalf("resume canResume = false, want true")
+	}
+	if videoService.watchViewer.Resume.Episode != 2 || videoService.watchViewer.Resume.WatchSeconds != 90 || videoService.watchViewer.Resume.DurationSeconds != 2700 {
+		t.Fatalf("resume = %#v", videoService.watchViewer.Resume)
 	}
 }
 
