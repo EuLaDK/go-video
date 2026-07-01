@@ -1,6 +1,6 @@
 # Next Video Go 后端开发记录
 
-更新日期：2026-06-25
+更新日期：2026-07-01
 
 ## 当前完成
 
@@ -84,6 +84,10 @@
 - 前端 `next-video` 播放页已读取播放配置：
   - `src/lib/video-api.ts` 的 mock fallback 返回同形 `playback` 配置。
   - `PlayerShell` 使用 `playback.sources` 作为 `<video>` 播放源，并提供清晰度选择。
+- 已完成前端 HLS/DASH 播放适配第一版：
+  - `next-video` 新增 `src/lib/player-source.ts`，按 `mimeType`/URL 将播放源识别为 `native`、`hls` 或 `dash`。
+  - `PlayerShell` 对 MP4 和浏览器原生 HLS 继续直连 `video.src`，对非原生 HLS 动态加载 `hls.js`，对 DASH 动态加载 `dashjs`。
+  - 切换清晰度或卸载播放器时会清理 HLS/DASH 实例和旧 `video.src`，避免旧播放源继续占用资源。
 
 ## 后续计划
 
@@ -100,8 +104,8 @@
    - 评论。
    - 弹幕。
 5. 继续增强真实播放器能力：
-   - 增加前端 HLS/DASH 播放引擎适配。
-   - 继续完善断点续播展示和播放页冒烟测试。
+   - 前端 HLS/DASH 播放引擎适配已完成第一版。
+   - 继续完善播放页冒烟测试和组件级测试。
 6. 增加后台内容管理：
    - 视频新增和编辑。
    - 上下架。
@@ -112,16 +116,18 @@
 
 ### 下次继续开发入口
 
-本次已完成 **真实 VIP 鉴权 v1**、**前端 VIP 状态同步 v1** 和 **断点续播服务端策略 v1**。下次建议从 HLS/DASH 播放适配和播放页冒烟测试继续，不急着做后台内容管理。
+本次已完成 **真实 VIP 鉴权 v1**、**前端 VIP 状态同步 v1**、**断点续播服务端策略 v1** 和 **前端 HLS/DASH 播放适配 v1**。下次建议从播放页冒烟测试和组件级测试继续，不急着做后台内容管理。
 
 优先顺序：
 
-1. 前端 HLS/DASH 播放适配：
-   - 后端播放源表已支持 `mime_type`，但浏览器端还需要按类型接入 HLS/DASH 播放库。
-   - 先保留 MP4 seed，避免本地演示选择到不存在的流媒体资源。
-
-2. 播放页冒烟和组件测试：
+1. 播放页冒烟和组件测试：
    - 覆盖播放详情读取 `playback.sources`、`playback.resume`、清晰度切换和初始恢复秒数。
+   - 验证 MP4、本地 mock fallback，以及未来 HLS/DASH 示例源不会破坏播放页加载。
+
+2. 继续补真实用户体系：
+   - 登录注册。
+   - 用户资料持久化。
+   - VIP 状态续期和过期处理。
 
 3. 本地联调时，在 `next-video` 前端配置：
 
@@ -252,4 +258,21 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
 - `node --test src\lib\video-api.test.mjs`：通过，已覆盖 mock fallback 返回同形 `playback.resume`。
 - `node --test src\lib\playback-resume.test.mjs`：通过，已覆盖 URL 参数优先、无参数时使用后端恢复点。
 - `node --test src\lib\*.test.mjs`：通过，92 个前端 lib 用例全部通过。
+- `npm.cmd run lint`：通过。
+
+### 2026-07-01 前端 HLS/DASH 播放适配 v1
+
+- `node --test src\lib\player-source.test.mjs`：通过，已覆盖 MP4、HLS、DASH 和未知类型的播放引擎识别。
+- `node --test src\lib\player-source.test.mjs src\lib\player-controls.test.mjs src\lib\video-api.test.mjs`：通过，16 个播放器和视频 API 相关用例全部通过。
+- `node --test src\lib\*.test.mjs`：通过，97 个前端 lib 用例全部通过。
+- `npm.cmd run lint`：通过。
+
+### 2026-07-01 播放器控制修复 v1
+
+- 前端 `PlayerShell` 已把清晰度、倍速和弹幕速度从原生 `select` 改为现有 shadcn/Radix `DropdownMenuRadioGroup`，修复深色播放器里 option 文字不可读的问题。
+- 修复播放源切换 key：同一集同一 `sourceUrl` 不再因为清晰度标签变化重建 video 节点；切换下一集时会重新绑定当前 video 源。
+- `play()` 被切源或暂停打断时的 `AbortError` 已被安全处理，不再形成未处理 Promise 错误。
+- 新增 `test:e2e` 和播放页 Playwright 冒烟入口；该入口默认连接手动启动的 `http://127.0.0.1:3000`，不再自动启动 Next 服务。
+- `node --test src\lib\player-source.test.mjs src\lib\player-controls.test.mjs src\lib\video-api.test.mjs`：通过，18 个播放器和视频 API 相关用例全部通过。
+- `npx.cmd playwright test --list`：通过，可识别播放页冒烟用例。
 - `npm.cmd run lint`：通过。
