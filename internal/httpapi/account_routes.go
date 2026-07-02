@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 type AccountService interface {
 	Profile(ctx context.Context, userID string) (account.UserProfile, error)
+	Register(ctx context.Context, input account.RegisterInput) (account.UserProfile, error)
 	Login(ctx context.Context, userID string, input account.LoginInput) (account.UserProfile, error)
 	ActivateVIP(ctx context.Context, userID string, input account.VipInput) (account.UserProfile, error)
 	Logout(ctx context.Context, userID string) (account.UserProfile, error)
@@ -39,6 +41,8 @@ func (server *Server) handleAccount(response http.ResponseWriter, request *http.
 	switch {
 	case request.URL.Path == "/me":
 		server.handleProfile(response, request)
+	case request.URL.Path == "/me/register":
+		server.handleRegister(response, request)
 	case request.URL.Path == "/me/login":
 		server.handleLogin(response, request)
 	case request.URL.Path == "/me/vip":
@@ -74,6 +78,28 @@ func (server *Server) handleProfile(response http.ResponseWriter, request *http.
 	writeJSON(response, http.StatusOK, profile)
 }
 
+// handleRegister 注册邮箱密码账号；response 为响应写入器，request 为当前请求。
+func (server *Server) handleRegister(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodPost {
+		writeError(response, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var input account.RegisterInput
+	if err := json.NewDecoder(request.Body).Decode(&input); err != nil {
+		writeError(response, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	profile, err := server.accountService.Register(request.Context(), input)
+	if err != nil {
+		writeError(response, accountErrorStatus(err), accountErrorMessage(err))
+		return
+	}
+
+	writeJSON(response, http.StatusCreated, profile)
+}
+
 // handleLogin 写入开发态登录资料；response 为响应写入器，request 为当前请求。
 func (server *Server) handleLogin(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
@@ -89,11 +115,39 @@ func (server *Server) handleLogin(response http.ResponseWriter, request *http.Re
 
 	profile, err := server.accountService.Login(request.Context(), userIDFromRequest(request), input)
 	if err != nil {
-		writeError(response, http.StatusInternalServerError, "internal server error")
+		writeError(response, accountErrorStatus(err), accountErrorMessage(err))
 		return
 	}
 
 	writeJSON(response, http.StatusOK, profile)
+}
+
+// accountErrorStatus 将账号服务错误映射为 HTTP 状态码；err 为服务层错误。
+func accountErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, account.ErrInvalidCredentials):
+		return http.StatusUnauthorized
+	case errors.Is(err, account.ErrEmailAlreadyRegistered):
+		return http.StatusConflict
+	case errors.Is(err, account.ErrInvalidAuthInput):
+		return http.StatusBadRequest
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+// accountErrorMessage 将账号服务错误映射为安全响应消息；err 为服务层错误。
+func accountErrorMessage(err error) string {
+	switch {
+	case errors.Is(err, account.ErrInvalidCredentials):
+		return "invalid credentials"
+	case errors.Is(err, account.ErrEmailAlreadyRegistered):
+		return "email already registered"
+	case errors.Is(err, account.ErrInvalidAuthInput):
+		return "invalid auth input"
+	default:
+		return "internal server error"
+	}
 }
 
 // handleActivateVIP 写入当前用户 VIP 状态；response 为响应写入器，request 为当前请求。

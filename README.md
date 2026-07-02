@@ -71,6 +71,7 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
 - `GET /videos/{id}`
 - `GET /videos/ids`
 - `GET /me`
+- `POST /me/register`
 - `POST /me/login`
 - `POST /me/logout`
 - `GET /me/favorites`
@@ -94,6 +95,12 @@ X-User-ID=demo-user
 ```
 
 未传 `X-User-ID` 时默认使用 `demo-user`。
+
+真实登录注册 v1：
+
+- `POST /me/register` 请求体：`{"email":"xia@example.com","password":"password123","nickname":"小夏"}`
+- `POST /me/login` 请求体：`{"email":"xia@example.com","password":"password123"}`
+- 登录/注册成功后，前端会把响应里的 `id` 作为后续 `X-User-ID`，用于收藏、观看历史、VIP、评论和弹幕的数据隔离。
 
 ## 验证
 

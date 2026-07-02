@@ -29,10 +29,16 @@ func (service *fakeAccountService) Profile(ctx context.Context, userID string) (
 	return service.profile, nil
 }
 
+// Register 模拟注册；ctx 为请求上下文，input 为注册输入。
+func (service *fakeAccountService) Register(ctx context.Context, input account.RegisterInput) (account.UserProfile, error) {
+	service.profile = account.UserProfile{ID: input.Email, Email: input.Email, IsLoggedIn: true, Nickname: input.Nickname}
+	return service.profile, nil
+}
+
 // Login 模拟登录；ctx 为请求上下文，userID 为用户标识，input 为登录输入。
 func (service *fakeAccountService) Login(ctx context.Context, userID string, input account.LoginInput) (account.UserProfile, error) {
 	service.userID = userID
-	service.profile = account.UserProfile{ID: userID, IsLoggedIn: true, Nickname: input.Nickname, Email: input.Contact}
+	service.profile = account.UserProfile{ID: input.Email, IsLoggedIn: true, Nickname: input.Nickname, Email: input.Email}
 	return service.profile, nil
 }
 
@@ -140,7 +146,7 @@ func TestAccountRoutesLoginAndLogout(t *testing.T) {
 	accountService := &fakeAccountService{}
 	srv := httpapi.NewServer(&fakeVideoService{}, accountService)
 
-	rec := requestJSON(srv, http.MethodPost, "/me/login", `{"nickname":"小夏","contact":"xia@example.com"}`, "custom-user")
+	rec := requestJSON(srv, http.MethodPost, "/me/login", `{"email":"xia@example.com","password":"password123"}`, "custom-user")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("login status = %d, want 200", rec.Code)
 	}
@@ -149,13 +155,31 @@ func TestAccountRoutesLoginAndLogout(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &profile); err != nil {
 		t.Fatal(err)
 	}
-	if !profile.IsLoggedIn || profile.Nickname != "小夏" || accountService.userID != "custom-user" {
+	if !profile.IsLoggedIn || profile.Email != "xia@example.com" || accountService.userID != "custom-user" {
 		t.Fatalf("profile = %#v userID = %q", profile, accountService.userID)
 	}
 
 	rec = requestJSON(srv, http.MethodPost, "/me/logout", "", "custom-user")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("logout status = %d, want 200", rec.Code)
+	}
+}
+
+func TestAccountRoutesRegister(t *testing.T) {
+	accountService := &fakeAccountService{}
+	srv := httpapi.NewServer(&fakeVideoService{}, accountService)
+
+	rec := requestJSON(srv, http.MethodPost, "/me/register", `{"email":"xia@example.com","password":"password123","nickname":"小夏"}`, "")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, want 201", rec.Code)
+	}
+
+	var profile account.UserProfile
+	if err := json.Unmarshal(rec.Body.Bytes(), &profile); err != nil {
+		t.Fatal(err)
+	}
+	if !profile.IsLoggedIn || profile.Email != "xia@example.com" || profile.Nickname != "小夏" {
+		t.Fatalf("profile = %#v", profile)
 	}
 }
 

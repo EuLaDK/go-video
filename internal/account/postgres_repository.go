@@ -22,7 +22,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 func (repository *PostgresRepository) GetUser(ctx context.Context, userID string) (UserProfile, error) {
 	var profile UserProfile
 	err := repository.pool.QueryRow(ctx, `
-		SELECT id, avatar_url, email, is_logged_in, is_vip, nickname, phone, vip_until
+		SELECT id, avatar_url, email, is_logged_in, is_vip, nickname, password_hash, phone, vip_until
 		FROM users
 		WHERE id = $1
 	`, userID).Scan(
@@ -32,6 +32,35 @@ func (repository *PostgresRepository) GetUser(ctx context.Context, userID string
 		&profile.IsLoggedIn,
 		&profile.IsVip,
 		&profile.Nickname,
+		&profile.PasswordHash,
+		&profile.Phone,
+		&profile.VipUntil,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return UserProfile{}, ErrUserNotFound
+	}
+	if err != nil {
+		return UserProfile{}, err
+	}
+
+	return profile, nil
+}
+
+// GetUserByEmail 按邮箱读取用户资料；ctx 为请求上下文，email 为规范化邮箱。
+func (repository *PostgresRepository) GetUserByEmail(ctx context.Context, email string) (UserProfile, error) {
+	var profile UserProfile
+	err := repository.pool.QueryRow(ctx, `
+		SELECT id, avatar_url, email, is_logged_in, is_vip, nickname, password_hash, phone, vip_until
+		FROM users
+		WHERE LOWER(email) = LOWER($1)
+	`, email).Scan(
+		&profile.ID,
+		&profile.AvatarURL,
+		&profile.Email,
+		&profile.IsLoggedIn,
+		&profile.IsVip,
+		&profile.Nickname,
+		&profile.PasswordHash,
 		&profile.Phone,
 		&profile.VipUntil,
 	)
@@ -55,20 +84,22 @@ func (repository *PostgresRepository) UpsertUser(ctx context.Context, profile Us
 			is_logged_in,
 			is_vip,
 			nickname,
+			password_hash,
 			phone,
 			vip_until,
 			updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			avatar_url = EXCLUDED.avatar_url,
 			email = EXCLUDED.email,
 			is_logged_in = EXCLUDED.is_logged_in,
 			is_vip = EXCLUDED.is_vip,
 			nickname = EXCLUDED.nickname,
+			password_hash = EXCLUDED.password_hash,
 			phone = EXCLUDED.phone,
 			vip_until = EXCLUDED.vip_until,
 			updated_at = NOW()
-	`, profile.ID, profile.AvatarURL, profile.Email, profile.IsLoggedIn, profile.IsVip, profile.Nickname, profile.Phone, profile.VipUntil)
+	`, profile.ID, profile.AvatarURL, profile.Email, profile.IsLoggedIn, profile.IsVip, profile.Nickname, profile.PasswordHash, profile.Phone, profile.VipUntil)
 
 	return err
 }

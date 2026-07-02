@@ -10,9 +10,13 @@ import (
 const DefaultUserID = "demo-user"
 
 var ErrUserNotFound = errors.New("user not found")
+var ErrEmailAlreadyRegistered = errors.New("email already registered")
+var ErrInvalidAuthInput = errors.New("invalid auth input")
+var ErrInvalidCredentials = errors.New("invalid credentials")
 
 type Repository interface {
 	GetUser(ctx context.Context, userID string) (UserProfile, error)
+	GetUserByEmail(ctx context.Context, email string) (UserProfile, error)
 	UpsertUser(ctx context.Context, profile UserProfile) error
 	ListFavorites(ctx context.Context, userID string) ([]FavoriteItem, error)
 	UpsertFavorite(ctx context.Context, userID string, item FavoriteItem) error
@@ -59,8 +63,52 @@ func (service *Service) Profile(ctx context.Context, userID string) (UserProfile
 	return profile, nil
 }
 
-// Login 写入开发态登录资料；ctx 为请求上下文，userID 为用户标识，input 为登录输入。
+// Register 创建邮箱密码账号；ctx 为请求上下文，input 为注册输入。
+func (service *Service) Register(ctx context.Context, input RegisterInput) (UserProfile, error) {
+	email, err := normalizeEmail(input.Email)
+	if err != nil {
+		return UserProfile{}, err
+	}
+	password := strings.TrimSpace(input.Password)
+	if err := validatePassword(password); err != nil {
+		return UserProfile{}, err
+	}
+
+	existing, err := service.repository.GetUserByEmail(ctx, email)
+	if err == nil && existing.ID != "" {
+		return UserProfile{}, ErrEmailAlreadyRegistered
+	}
+	if err != nil && !errors.Is(err, ErrUserNotFound) {
+		return UserProfile{}, err
+	}
+
+	passwordHash, err := hashPassword(password)
+	if err != nil {
+		return UserProfile{}, err
+	}
+
+	profile := defaultProfile(email)
+	profile.Email = email
+	profile.IsLoggedIn = true
+	profile.Nickname = strings.TrimSpace(input.Nickname)
+	profile.PasswordHash = passwordHash
+	if profile.Nickname == "" {
+		profile.Nickname = defaultNickname
+	}
+
+	if err := service.repository.UpsertUser(ctx, profile); err != nil {
+		return UserProfile{}, err
+	}
+
+	return profile, nil
+}
+
+// Login 写入登录资料；ctx 为请求上下文，userID 为开发态标识，input 为登录输入。
 func (service *Service) Login(ctx context.Context, userID string, input LoginInput) (UserProfile, error) {
+	if strings.TrimSpace(input.Password) != "" {
+		return service.loginWithPassword(ctx, input)
+	}
+
 	profile := defaultProfile(normalizeUserID(userID))
 	contact := strings.TrimSpace(input.Contact)
 
@@ -76,6 +124,32 @@ func (service *Service) Login(ctx context.Context, userID string, input LoginInp
 		profile.Phone = contact
 	}
 
+	if err := service.repository.UpsertUser(ctx, profile); err != nil {
+		return UserProfile{}, err
+	}
+
+	return profile, nil
+}
+
+// loginWithPassword 校验邮箱密码并返回登录资料；ctx 为请求上下文，input 为登录输入。
+func (service *Service) loginWithPassword(ctx context.Context, input LoginInput) (UserProfile, error) {
+	email, err := normalizeEmail(input.Email)
+	if err != nil {
+		return UserProfile{}, ErrInvalidCredentials
+	}
+
+	profile, err := service.repository.GetUserByEmail(ctx, email)
+	if errors.Is(err, ErrUserNotFound) {
+		return UserProfile{}, ErrInvalidCredentials
+	}
+	if err != nil {
+		return UserProfile{}, err
+	}
+	if !verifyPassword(strings.TrimSpace(input.Password), profile.PasswordHash) {
+		return UserProfile{}, ErrInvalidCredentials
+	}
+
+	profile.IsLoggedIn = true
 	if err := service.repository.UpsertUser(ctx, profile); err != nil {
 		return UserProfile{}, err
 	}
@@ -106,7 +180,15 @@ func (service *Service) ActivateVIP(ctx context.Context, userID string, input Vi
 
 // Logout 清空开发态登录资料；ctx 为请求上下文，userID 为用户标识。
 func (service *Service) Logout(ctx context.Context, userID string) (UserProfile, error) {
-	profile := defaultProfile(normalizeUserID(userID))
+	normalizedUserID := normalizeUserID(userID)
+	profile, err := service.repository.GetUser(ctx, normalizedUserID)
+	if errors.Is(err, ErrUserNotFound) {
+		profile = defaultProfile(normalizedUserID)
+	} else if err != nil {
+		return UserProfile{}, err
+	}
+
+	profile.IsLoggedIn = false
 	if err := service.repository.UpsertUser(ctx, profile); err != nil {
 		return UserProfile{}, err
 	}
@@ -211,4 +293,14 @@ func normalizeUserID(userID string) string {
 	}
 
 	return normalizedUserID
+}
+
+// normalizeEmail 规范化邮箱；email 为空或格式不完整时返回认证输入错误。
+func normalizeEmail(email string) (string, error) {
+	normalizedEmail := strings.ToLower(strings.TrimSpace(email))
+	if normalizedEmail == "" || !strings.Contains(normalizedEmail, "@") {
+		return "", ErrInvalidAuthInput
+	}
+
+	return normalizedEmail, nil
 }

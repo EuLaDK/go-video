@@ -2,6 +2,7 @@ package account_test
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -19,6 +20,17 @@ type fakeRepository struct {
 func (repo *fakeRepository) GetUser(ctx context.Context, userID string) (account.UserProfile, error) {
 	if profile, ok := repo.users[userID]; ok {
 		return profile, nil
+	}
+
+	return account.UserProfile{}, account.ErrUserNotFound
+}
+
+// GetUserByEmail 返回测试邮箱用户；ctx 为调用上下文，email 为规范化邮箱。
+func (repo *fakeRepository) GetUserByEmail(ctx context.Context, email string) (account.UserProfile, error) {
+	for _, profile := range repo.users {
+		if profile.Email == email {
+			return profile, nil
+		}
 	}
 
 	return account.UserProfile{}, account.ErrUserNotFound
@@ -146,6 +158,86 @@ func TestServiceLoginAndLogout(t *testing.T) {
 
 	if loggedOut.IsLoggedIn || loggedOut.IsVip {
 		t.Fatalf("loggedOut = %#v", loggedOut)
+	}
+}
+
+func TestServiceRegisterCreatesPasswordAccount(t *testing.T) {
+	repo := newFakeRepository()
+	svc := account.NewService(repo, fixedClock())
+
+	profile, err := svc.Register(context.Background(), account.RegisterInput{
+		Email:    "  XIA@Example.COM  ",
+		Password: "password123",
+		Nickname: "  小夏  ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if profile.ID != "xia@example.com" || profile.Email != "xia@example.com" || profile.Nickname != "小夏" || !profile.IsLoggedIn {
+		t.Fatalf("profile = %#v", profile)
+	}
+	if profile.PasswordHash == "" || profile.PasswordHash == "password123" {
+		t.Fatalf("password hash was not stored safely: %#v", repo.users[profile.ID])
+	}
+}
+
+func TestServiceRegisterRejectsDuplicateEmail(t *testing.T) {
+	repo := newFakeRepository()
+	svc := account.NewService(repo, fixedClock())
+
+	_, err := svc.Register(context.Background(), account.RegisterInput{
+		Email:    "xia@example.com",
+		Password: "password123",
+		Nickname: "小夏",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.Register(context.Background(), account.RegisterInput{
+		Email:    " XIA@example.com ",
+		Password: "password456",
+		Nickname: "另一个小夏",
+	})
+	if !errors.Is(err, account.ErrEmailAlreadyRegistered) {
+		t.Fatalf("err = %v, want ErrEmailAlreadyRegistered", err)
+	}
+}
+
+func TestServiceLoginWithPassword(t *testing.T) {
+	repo := newFakeRepository()
+	svc := account.NewService(repo, fixedClock())
+
+	registered, err := svc.Register(context.Background(), account.RegisterInput{
+		Email:    "xia@example.com",
+		Password: "password123",
+		Nickname: "小夏",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered.IsLoggedIn = false
+	repo.users[registered.ID] = registered
+
+	loggedIn, err := svc.Login(context.Background(), "ignored-user", account.LoginInput{
+		Email:    " XIA@example.com ",
+		Password: "password123",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if loggedIn.ID != registered.ID || !loggedIn.IsLoggedIn || loggedIn.Nickname != "小夏" {
+		t.Fatalf("loggedIn = %#v", loggedIn)
+	}
+
+	_, err = svc.Login(context.Background(), "ignored-user", account.LoginInput{
+		Email:    "xia@example.com",
+		Password: "wrong-password",
+	})
+	if !errors.Is(err, account.ErrInvalidCredentials) {
+		t.Fatalf("err = %v, want ErrInvalidCredentials", err)
 	}
 }
 

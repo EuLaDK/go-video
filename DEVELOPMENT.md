@@ -1,6 +1,6 @@
 # Next Video Go 后端开发记录
 
-更新日期：2026-07-01
+更新日期：2026-07-02
 
 ## 当前完成
 
@@ -31,6 +31,7 @@
 - 已添加 `cmd/migrate`，可直接执行 migration 和 seed。
 - 已实现开发态用户、收藏和观看历史 API：
   - `GET /me`
+  - `POST /me/register`
   - `POST /me/login`
   - `POST /me/logout`
   - `GET /me/favorites`
@@ -44,6 +45,15 @@
   - `users`
   - `user_favorites`
   - `user_watch_history`
+- 已实现真实登录注册 v1：
+  - `users` 表新增 `password_hash` 字段。
+  - 新增 `POST /me/register`，支持邮箱、密码、昵称注册。
+  - `POST /me/login` 已支持邮箱密码登录，同时保留开发态资料写入兼容路径。
+  - 密码以带盐 HMAC-SHA256 迭代哈希持久化，不保存明文。
+  - 邮箱按小写去空格规范化，并通过唯一索引避免重复注册。
+- 已完成真实登录注册错误提示 v1：
+  - 登录/注册请求在真实接口返回 400/401/409 时不再静默 fallback。
+  - 前端登录弹窗会展示登录失败、重复邮箱、弱密码等中文提示，并在失败时保持打开。
 - 已添加开发态默认用户 `demo-user`。
 - 前端 `next-video` 已开始接入 `/me` 系列接口：
   - 新增 `src/lib/account-api.ts`。
@@ -96,10 +106,12 @@
    - 用户资料。
    - 收藏。
    - 观看历史。
-3. 增加真实用户系统：
-   - 登录注册。
-   - 用户资料。
-   - VIP 状态持久化。
+3. 增强真实用户系统：
+   - 登录注册 v1 已完成。
+   - 登录失败前端提示、注册重复邮箱提示、弱密码提示已完成第一版。
+   - 后续升级 session/JWT，替换开发期 `X-User-ID` 轻量会话。
+   - 用户资料编辑。
+   - VIP 状态持久化已完成第一版，后续补续期和过期提示。
 4. 增加互动数据服务端化：
    - 评论。
    - 弹幕。
@@ -116,7 +128,7 @@
 
 ### 下次继续开发入口
 
-本次已完成 **真实 VIP 鉴权 v1**、**前端 VIP 状态同步 v1**、**断点续播服务端策略 v1** 和 **前端 HLS/DASH 播放适配 v1**。下次建议从播放页冒烟测试和组件级测试继续，不急着做后台内容管理。
+本次已完成 **真实 VIP 鉴权 v1**、**前端 VIP 状态同步 v1**、**断点续播服务端策略 v1**、**前端 HLS/DASH 播放适配 v1**、**真实登录注册 v1** 和 **登录/注册错误提示 v1**。下次建议继续做播放页冒烟/组件测试，并开始准备 session/JWT。
 
 优先顺序：
 
@@ -125,8 +137,8 @@
    - 验证 MP4、本地 mock fallback，以及未来 HLS/DASH 示例源不会破坏播放页加载。
 
 2. 继续补真实用户体系：
-   - 登录注册。
-   - 用户资料持久化。
+   - session/JWT。
+   - 用户资料持久化编辑。
    - VIP 状态续期和过期处理。
 
 3. 本地联调时，在 `next-video` 前端配置：
@@ -276,3 +288,24 @@ NEXT_PUBLIC_API_BASE_URL=http://localhost:8080
 - `node --test src\lib\player-source.test.mjs src\lib\player-controls.test.mjs src\lib\video-api.test.mjs`：通过，18 个播放器和视频 API 相关用例全部通过。
 - `npx.cmd playwright test --list`：通过，可识别播放页冒烟用例。
 - `npm.cmd run lint`：通过。
+
+### 2026-07-02 真实登录注册 v1
+
+- 后端新增 `migrations/005_add_user_password_hash.sql`，为 `users` 表增加 `password_hash`，并对非空邮箱建立唯一索引。
+- 后端新增 `POST /me/register`，支持邮箱、密码、昵称注册；`POST /me/login` 支持邮箱密码登录。
+- 后端保留开发期 `X-User-ID` 轻量会话，登录/注册成功后由前端持久化用户 id，后续账号状态请求带 `X-User-ID`。
+- 前端登录弹窗已改为登录/注册二合一，字段为邮箱、密码、注册昵称。
+- 前端 API client 会在本地用户处于 `isLoggedIn=true` 且存在 `id` 时自动追加 `X-User-ID` 请求头。
+- `go test ./...`：通过。
+- `node --test src\lib\*.test.mjs src\stores\account-sync-stores.test.mjs`：通过，105 个前端 lib/store 用例全部通过。
+- `npm.cmd run lint`：通过。
+
+### 2026-07-02 登录/注册错误提示 v1
+
+- 前端 `loginAccount`/`registerAccount` 对真实接口 400/401/409 响应抛出可识别错误，未配置 API 地址时仍保留本地演示 fallback。
+- 用户 store 新增 `authPending` 和 `authError`，登录/注册失败时保持未登录并写入中文错误提示。
+- 登录弹窗提交时等待接口结果，失败时保留弹窗、展示错误，成功时再关闭。
+- `node --test src\lib\account-api.test.mjs src\stores\account-sync-stores.test.mjs`：通过，13 个账户 API/store 用例全部通过。
+- `node --test src\lib\*.test.mjs src\stores\account-sync-stores.test.mjs`：通过，109 个前端 lib/store 用例全部通过。
+- `npm.cmd run lint`：通过。
+- `npx.cmd tsc --noEmit`：通过。

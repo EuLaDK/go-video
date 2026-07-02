@@ -1,20 +1,29 @@
 package account
 
 type UserProfile struct {
-	ID         string `json:"id"`
-	AvatarURL  string `json:"avatarUrl"`
-	Email      string `json:"email"`
-	IsLoggedIn bool   `json:"isLoggedIn"`
-	IsVip      bool   `json:"isVip"`
-	Nickname   string `json:"nickname"`
-	Phone      string `json:"phone"`
-	VipUntil   string `json:"vipUntil"`
+	ID           string `json:"id"`
+	AvatarURL    string `json:"avatarUrl"`
+	Email        string `json:"email"`
+	IsLoggedIn   bool   `json:"isLoggedIn"`
+	IsVip        bool   `json:"isVip"`
+	Nickname     string `json:"nickname"`
+	PasswordHash string `json:"-"`
+	Phone        string `json:"phone"`
+	VipUntil     string `json:"vipUntil"`
 }
 
 type LoginInput struct {
 	AvatarURL string `json:"avatarUrl"`
 	Contact   string `json:"contact"`
+	Email     string `json:"email"`
 	Nickname  string `json:"nickname"`
+	Password  string `json:"password"`
+}
+
+type RegisterInput struct {
+	Email    string `json:"email"`
+	Nickname string `json:"nickname"`
+	Password string `json:"password"`
 }
 
 type VipInput struct {

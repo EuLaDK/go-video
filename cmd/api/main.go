@@ -43,7 +43,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("next-video api listening on http://localhost:%s", cfg.Port)
+		log.Printf("next-video api listening on http://10.16.30.130:%s", cfg.Port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("listen and serve: %v", err)
 		}
